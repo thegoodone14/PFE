@@ -1,0 +1,10 @@
+# Fichier : .gitignore
+
+# Environnement local et secrets
+.env
+__pycache__/
+*.pyc
+venv/
+env/
+db.sqlite3
+django_cache/
