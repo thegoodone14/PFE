@@ -1,0 +1,13 @@
+<svg width="220" height="56" viewBox="0 0 220 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cm_blue" x1="8" y1="8" x2="44" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1565C0"/>
+      <stop offset="1" stop-color="#0D47A1"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="52" height="52" rx="14" fill="url(#cm_blue)"/>
+  <path d="M28 12C21.65 12 16.5 17.15 16.5 23.5C16.5 31.9 28 44 28 44C28 44 39.5 31.9 39.5 23.5C39.5 17.15 34.35 12 28 12Z" fill="#F4F9FF"/>
+  <circle cx="28" cy="23.4" r="4.1" fill="#1565C0"/>
+  <path d="M19 34C22.4 30.8 25.4 29.2 28.8 28.6C32 28 35.4 29.2 39 32" stroke="#00BFA5" stroke-width="2.5" stroke-linecap="round"/>
+  <text x="66" y="36" fill="#FFFFFF" stroke="#0D47A1" stroke-width="0.7" font-size="30" font-weight="800" font-family="Roboto, Arial, sans-serif">Cmove</text>
+</svg>

@@ -25,12 +25,15 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY', 'dev-only-secret-key-change-me')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG') == 'True'
+# Default local dev mode if DEBUG is not provided.
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = []
+# Safe local defaults to avoid startup errors during development.
+raw_allowed_hosts = os.getenv('ALLOWED_HOSTS', '127.0.0.1,localhost').strip()
+ALLOWED_HOSTS = [host.strip() for host in raw_allowed_hosts.split(',') if host.strip()]
 
 
 # Application definition
@@ -89,9 +92,19 @@ MONGO_URI = os.getenv('MONGO_URI')
 
 # On initialise le client ici pour qu'il soit accessible
 try:
-    client = MongoClient(MONGO_URI)
-    DB_RATP = client['calm_move_db'] # ex: 'ratp_data'
-    print("✅ Connexion MongoDB réussie")
+    if MONGO_URI:
+        client = MongoClient(
+            MONGO_URI,
+            serverSelectionTimeoutMS=2000,
+            connectTimeoutMS=2000,
+            socketTimeoutMS=2000,
+        )
+        client.admin.command("ping")
+        DB_RATP = client['calm_move_db'] # ex: 'ratp_data'
+        print("✅ Connexion MongoDB réussie")
+    else:
+        DB_RATP = None
+        print("⚠️ MONGO_URI absent: demarrage sans scoring MongoDB.")
 except Exception as e:
     print(f"❌ Erreur connexion MongoDB: {e}")
     DB_RATP = None
@@ -105,6 +118,12 @@ DATABASES = {
 
 # Ajoutez votre Token Navitia ici (ou mieux, via os.getenv)
 NAVITIA_TOKEN = os.getenv('NAVITIA_TOKEN')
+NAVITIA_ALLOW_DEMO_FALLBACK = os.getenv('NAVITIA_ALLOW_DEMO_FALLBACK', 'False') == 'True'
+# URL des itineraires (PRIM). Surcharge rare (proxy interne, tests).
+NAVITIA_JOURNEYS_URL = os.getenv(
+    'NAVITIA_JOURNEYS_URL',
+    'https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys',
+)
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators

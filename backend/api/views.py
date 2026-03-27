@@ -33,6 +33,9 @@ class PedestrianSearch(APIView):
             return Response({"error": "Paramètres 'start' et 'end' requis"}, status=400)
 
         service = PedestrianTomTomService()
-        result = service.calculate_pedestrian_safe_routes(start, end)
+        try:
+            result = service.calculate_pedestrian_safe_routes(start, end)
+        except Exception as e:
+            return Response({"error": f"Erreur API piéton: {str(e)}"}, status=502)
         
         return Response(result)

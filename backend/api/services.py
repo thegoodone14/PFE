@@ -1,32 +1,48 @@
 import requests
 import datetime
+import json
+from pathlib import Path
 from django.conf import settings
 
 class MobilityService:
     def __init__(self):
         self.db = settings.DB_RATP
-        # ✅ CORRECTION : On utilise le vrai nom de votre collection
-        self.collection = self.db['station_stats'] 
+        # Use MongoDB collection when available, otherwise run in degraded mode.
+        self.collection = self.db['station_stats'] if self.db is not None else None
         self.navitia_token = settings.NAVITIA_TOKEN
-        # URL PRIM (Production)
-        self.navitia_url = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys"
+        self.allow_demo_fallback = getattr(settings, "NAVITIA_ALLOW_DEMO_FALLBACK", False)
+        self.navitia_url = getattr(
+            settings,
+            "NAVITIA_JOURNEYS_URL",
+            "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys",
+        )
+        # Ignore system proxy env vars that can break local calls with 403 tunnel errors.
+        self.http = requests.Session()
+        self.http.trust_env = False
+
+    def _load_navitia_fallback(self):
+        """Load local sample response when external Navitia API is unavailable."""
+        fallback_path = Path(settings.BASE_DIR).parent / "response.json"
+        if fallback_path.exists():
+            with open(fallback_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return None
 
     def _get_cat_jour(self, dt):
         """Détermine la catégorie de jour (JOHV, SAHV, DIJFP)"""
         weekday = dt.weekday()
-        #if weekday < 5:
-        return 'JOHV' # Lundi à Vendredi
-        #elif weekday == 5:
-           # return 'SAHV' # Samedi
-        #else:
-         #   return 'DIJFP' # Dimanche et Fériés
+        if weekday < 5:
+            return 'JOHV' # Lundi à Vendredi
+        elif weekday == 5:
+            return 'SAHV' # Samedi
+        else:
+            return 'DIJFP' # Dimanche et Fériés
 
     def _get_time_slot(self, dt):
         """Formatage heure pour le dataset RATP (ex: '8H-9H')"""
         hour = dt.hour
         next_hour = (hour + 1) % 24
-        # return f"{hour}H-{next_hour}H"
-        return "8H-9H"
+        return f"{hour}H-{next_hour}H"
 
     def _get_affluence_score(self, stop_area_id, dt):
         """
@@ -75,6 +91,26 @@ class MobilityService:
             
         return 0
 
+    @staticmethod
+    def _navitia_error_message(exc: Exception) -> str:
+        raw = str(exc)
+        if any(
+            marker in raw
+            for marker in (
+                "Failed to resolve",
+                "NameResolutionError",
+                "getaddrinfo failed",
+                "nodename nor servname",
+            )
+        ):
+            return (
+                "echec DNS : impossible de resoudre prim.iledefrance-mobilites.fr. "
+                "Verifie la connexion internet et le DNS (ex. ping ou nslookup sur ce domaine). "
+                "Pour travailler sans reseau, mets NAVITIA_ALLOW_DEMO_FALLBACK=True dans backend/.env "
+                "(itineraire de demo fige dans response.json)."
+            )
+        return raw
+
     def calculate_safe_route(self, depart_coord, arrivee_coord):
         # 1. Appel API PRIM / Navitia
         headers = {'apiKey': self.navitia_token}
@@ -85,10 +121,18 @@ class MobilityService:
         }
         
         try:
-            resp = requests.get(self.navitia_url, headers=headers, params=params)
+            resp = self.http.get(self.navitia_url, headers=headers, params=params, timeout=20)
+            resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            return {"error": f"Erreur API: {str(e)}"}
+            # response.json est un echantillon fige (ex. Baconnets -> Ivry) : ne l'utiliser
+            # que si la demo hors-ligne est explicitement autorisee.
+            if self.allow_demo_fallback:
+                data = self._load_navitia_fallback()
+                if data is None:
+                    return {"error": f"Erreur API: {self._navitia_error_message(e)}"}
+            else:
+                return {"error": f"Erreur API Navitia/PRIM: {self._navitia_error_message(e)}"}
 
         if 'journeys' not in data:
             return {"error": "Aucun itinéraire trouvé", "details": data}
@@ -133,9 +177,18 @@ class MobilityService:
 
             # Résumé global du trajet
             journey['sections'] = sections_data
-            journey['global_crowd_score'] = max_affluence
+            if max_affluence == 0:
+                # Fallback estimate when external crowd data is unavailable.
+                duration_min = (journey.get('duration', 0) or 0) / 60
+                transfers = journey.get('nb_transfers', 0) or 0
+                estimated = min(10.0, round(2.0 + (transfers * 1.5) + (duration_min / 30), 2))
+                journey['global_crowd_score'] = estimated
+                journey['score_source'] = 'estimated'
+            else:
+                journey['global_crowd_score'] = max_affluence
+                journey['score_source'] = 'observed'
             # Seuil arbitraire : si score < 5, le trajet est "Safe" pour un phobique
-            journey['is_safe_route'] = max_affluence < 5 
+            journey['is_safe_route'] = journey['global_crowd_score'] < 5 
             
             processed_journeys.append(journey)
 

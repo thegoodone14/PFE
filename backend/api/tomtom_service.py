@@ -26,6 +26,9 @@ class PedestrianTomTomService:
         self.points_limit = 6
         self.places_per_point = 3
         self.pause = 0.2
+        self.http = requests.Session()
+        # Ignore system proxy env vars that can produce 403 tunnel errors locally.
+        self.http.trust_env = False
 
     def _generate_cache_key(self, prefix, params):
         s = json.dumps(params, sort_keys=True, ensure_ascii=False)
@@ -35,14 +38,22 @@ class PedestrianTomTomService:
     def safe_get(self, url, params=None, timeout=30, max_retries=3):
         delay = 1
         for i in range(max_retries):
-            r = requests.get(url, params=params, timeout=timeout)
+            try:
+                r = self.http.get(url, params=params, timeout=timeout)
+            except requests.RequestException:
+                time.sleep(delay)
+                delay *= 2
+                continue
             if r.status_code == 429:
                 time.sleep(delay)
                 delay *= 2
                 continue
             if r.status_code != 200:
                 print(f"TomTom API Error: {r.text}")
-            r.raise_for_status()
+            try:
+                r.raise_for_status()
+            except requests.RequestException:
+                return None
             return r
         return None
 
@@ -131,7 +142,21 @@ class PedestrianTomTomService:
 
         routing_data = self.get_routes(s_lat, s_lng, e_lat, e_lng)
         if not routing_data or 'routes' not in routing_data:
-            return {"error": "Aucun itinéraire piéton trouvé."}
+            # Graceful local fallback when TomTom is unavailable.
+            return [{
+                "type": "pedestrian",
+                "route_index": 1,
+                "distance_m": 0,
+                "duration_min": 0,
+                "global_crowd_score": 0,
+                "is_safe_route": True,
+                "heat_points": [],
+                "route_coordinates": [
+                    [float(s_lat), float(s_lng)],
+                    [float(e_lat), float(e_lng)],
+                ],
+                "score_source": "fallback",
+            }]
 
         candidates = []
         for idx, route in enumerate(routing_data.get("routes", [])):
