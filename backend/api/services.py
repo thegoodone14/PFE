@@ -179,9 +179,22 @@ class MobilityService:
             journey['sections'] = sections_data
             if max_affluence == 0:
                 # Fallback estimate when external crowd data is unavailable.
+                # Spread components so similar journeys still get differentiable scores in the UI.
                 duration_min = (journey.get('duration', 0) or 0) / 60
                 transfers = journey.get('nb_transfers', 0) or 0
-                estimated = min(10.0, round(2.0 + (transfers * 1.5) + (duration_min / 30), 2))
+                pt_sections = sum(
+                    1 for s in journey.get('sections', []) if s.get('type') == 'public_transport'
+                )
+                estimated = min(
+                    10.0,
+                    round(
+                        2.0
+                        + (transfers * 1.85)
+                        + (duration_min / 22.0)
+                        + (pt_sections * 0.45),
+                        2,
+                    ),
+                )
                 journey['global_crowd_score'] = estimated
                 journey['score_source'] = 'estimated'
             else:
